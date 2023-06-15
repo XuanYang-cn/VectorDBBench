@@ -88,7 +88,16 @@ class BenchMarkRunner:
     def has_running(self) -> bool:
         """check if there're running benchmarks"""
         if self.running_task:
-            self._try_get_signal()
+            global global_result_future
+            if global_result_future and global_result_future.done():
+                excp = global_result_future.exception()
+                if excp is None:
+                    self._try_get_signal()
+                else:
+                    msg = f"task suspended unexpectedly: reason={excp}"
+                    log.warning(msg)
+                    self.latest_error = msg
+                    self._clear_running_task()
         return self.running_task is not None
 
     def stop_running(self):
@@ -191,9 +200,6 @@ class BenchMarkRunner:
             return
 
     def _clear_running_task(self):
-        global global_result_future
-        global_result_future = None
-
         if self.running_task:
             log.info(f"will force stop running task: {self.running_task.run_id}")
             for r in self.running_task.case_runners:
@@ -205,6 +211,10 @@ class BenchMarkRunner:
         if self.receive_conn:
             self.receive_conn.close()
             self.receive_conn = None
+
+        global global_result_future
+        global_result_future = None
+
 
 
     def _run_async(self, conn: Connection) -> bool:
