@@ -1,6 +1,7 @@
 """Wrapper around the Milvus vector database over VectorDB"""
 
 import logging
+import time
 from contextlib import contextmanager
 from typing import Iterable, Type
 
@@ -127,7 +128,14 @@ class Milvus(VectorDB):
                 self.case_config.index_param(),
                 index_name=self._index_name,
             )
+
             utility.wait_for_index_building_complete(self.collection_name)
+            while True:
+                progress = utility.index_building_progress(self.collection_name)
+                if progress.get("pending_index_rows", -1) == 0:
+                    break
+                time.sleep(5)
+
         except Exception as e:
             log.warning(f"{self.name} optimize error: {e}")
             raise e from None
