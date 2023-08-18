@@ -55,10 +55,15 @@ class Milvus(VectorDB):
             log.info(f"{self.name} create collection: {self.collection_name}")
 
             # Create the collection
-            Collection(
+            col = Collection(
                 name=self.collection_name,
                 schema=CollectionSchema(fields),
                 consistency_level="Session",
+            )
+            col.create_index(
+                self._vector_field,
+                self.case_config.index_param(),
+                index_name=self._index_name,
             )
 
             #  self._pre_load(coll)
