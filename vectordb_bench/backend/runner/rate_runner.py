@@ -1,0 +1,70 @@
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing as mp
+
+
+from vectordb_bench.backend.clients import api
+from vectordb_bench.backend.dataset import DatasetManager
+from vectordb_bench.backend.utils import time_it
+
+from .util import get_data, is_futures_completed, get_future_exceptions
+log = logging.getLogger(__name__)
+
+
+class RatedMultiThreadingInsertRunner:
+    def __init__(
+        self,
+        rate: int, # req per second
+        db: api.VectorDB,
+        dataset: DatasetManager,
+        normalize: bool = False,
+        timeout: float | None = None,
+    ):
+        self.timeout = timeout if isinstance(timeout, (int, float)) else None
+        self.dataset = dataset
+        self.db = db
+        self.normalize = normalize
+        self.rate = rate
+
+    def send_insert_task(self, emb: list[list[float]], metadata: list[str]):
+        self.db.insert_embeddings(emb, metadata)
+
+
+    @time_it
+    def run_with_rate(self):
+        with ThreadPoolExecutor(max_workers=mp.cpu_count(), initializer=self.db.init) as executor:
+            executing_futures = []
+            dataset_iter = iter(self.dataset)
+
+            def submit_by_rate() -> (float, bool):
+                start_time, rate = time.perf_counter(), self.rate
+                for data in dataset_iter:
+                    emb, metadata = get_data(data, self.normalize)
+                    executing_futures.append(executor.submit(self.send_insert_task, emb, metadata))
+                    rate -= 1
+
+                    if rate == 0:
+                        return time.perf_counter() - start_time, executing_futures, False
+                return time.perf_counter() - start_time, rate == self.rate
+
+            while True:
+                elapsed_time, finished = submit_by_rate()
+                if finished is True:
+                    log.info(f"End of dataset, left unfinished={len(executing_futures)}")
+                    return
+
+                wait_interval = 1 - elapsed_time if elapsed_time < 1 else 0.001
+
+                e, completed = is_futures_completed(executing_futures, wait_interval)
+                if completed is True:
+                    ex = get_future_exceptions(executing_futures)
+                    if ex is not None:
+                        log.warn(f"task error, terminating, err={ex}")
+                        executor.shutdown(wait=True, cancel_futures=True)
+                        raise ex
+                    else:
+                        log.info(f"Finished {len(executing_futures)} task in 1s, wait_interval={wait_interval:.2f}")
+                    executing_futures = []
+                else:
+                    log.warning(f"Failed to finish tasks in 1s, {e}, waited={wait_interval:.2f}, try to check the next round")

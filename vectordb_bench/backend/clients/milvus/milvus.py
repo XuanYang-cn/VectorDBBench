@@ -70,7 +70,7 @@ class Milvus(VectorDB):
 
         connections.disconnect("default")
 
-    @contextmanager
+    #  @contextmanager
     def init(self) -> None:
         """
         Examples:
@@ -85,8 +85,8 @@ class Milvus(VectorDB):
         # Grab the existing colection with connections
         self.col = Collection(self.collection_name)
 
-        yield
-        connections.disconnect("default")
+        #  yield
+        #  connections.disconnect("default")
 
     def _optimize(self):
         self._post_insert()
