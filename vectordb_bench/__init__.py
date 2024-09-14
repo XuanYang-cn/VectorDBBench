@@ -17,7 +17,7 @@ class config:
 
     DEFAULT_DATASET_URL = env.str("DEFAULT_DATASET_URL", AWS_S3_URL)
     DATASET_LOCAL_DIR = env.path("DATASET_LOCAL_DIR", "/tmp/vectordb_bench/dataset")
-    NUM_PER_BATCH = env.int("NUM_PER_BATCH", 5000)
+    NUM_PER_BATCH = env.int("NUM_PER_BATCH", 100)
 
     DROP_OLD = env.bool("DROP_OLD", True)
     USE_SHUFFLED_DATA = env.bool("USE_SHUFFLED_DATA", True)
@@ -36,6 +36,7 @@ class config:
 
     K_DEFAULT = 100  # default return top k nearest neighbors during search
     CUSTOM_CONFIG_DIR = pathlib.Path(__file__).parent.joinpath("custom/custom_case.json")
+    READ_WRITE_SEARCH_DUR = 100_000 # Per number of inserted rows
 
     CAPACITY_TIMEOUT_IN_SECONDS = 24 * 3600 # 24h
     LOAD_TIMEOUT_DEFAULT        = 2.5 * 3600 # 2.5h

@@ -67,10 +67,12 @@ class Milvus(VectorDB):
                 index_name=self._index_name,
             )
             #  self._pre_load(coll)
+            if kwargs.get("pre_load") is True:
+                self._pre_load(col)
 
         connections.disconnect("default")
 
-    @contextmanager
+    #  @contextmanager
     def init(self) -> None:
         """
         Examples:
@@ -85,8 +87,8 @@ class Milvus(VectorDB):
         # Grab the existing colection with connections
         self.col = Collection(self.collection_name)
 
-        yield
-        connections.disconnect("default")
+        #  yield
+        #  connections.disconnect("default")
 
     def _optimize(self):
         self._post_insert()
