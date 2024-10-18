@@ -1,5 +1,6 @@
 from vectordb_bench.backend.dataset import Dataset, DatasetSource
 from vectordb_bench.backend.runner.rate_runner import RatedMultiThreadingInsertRunner
+from vectordb_bench.backend.runner.read_write_runner import ReadWriteRunner
 from vectordb_bench.backend.clients import DB
 from vectordb_bench.backend.clients.milvus.config import FLATConfig
 import logging
@@ -30,9 +31,22 @@ def test_rate_runner_milvus():
     _, t = runner.run_with_rate()
     log.info(f"insert run done, time={t}")
 
+def test_read_write_runner_milvus():
+    milvus = DB.Milvus.init_cls(dim=768, db_config=db_config, db_case_config=FLATConfig(metric_type="COSINE"), drop_old=True, pre_load=True)
+
+    cohere = Dataset.COHERE.manager(1_000_000)
+    prepared = cohere.prepare(DatasetSource.AliyunOSS)
+    assert prepared
+
+    rw_runner = ReadWriteRunner(
+        milvus, cohere,
+    )
+    rw_runner.run_read_write()
+
 
 if __name__ == "__main__":
-    test_rate_runner_milvus()
+    #  test_rate_runner_milvus()
+    test_read_write_runner_milvus()
 
     from pymilvus import MilvusClient
     c = MilvusClient(**db_config)

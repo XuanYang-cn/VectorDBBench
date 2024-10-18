@@ -45,32 +45,33 @@ class MultiProcessingSearchRunner:
         with cond:
             cond.wait()
 
-        with self.db.init():
-            num, idx = len(test_data), 0
+        #  with self.db.init():
+        self.db.init()
+        num, idx = len(test_data), 0
 
-            start_time = time.perf_counter()
-            count = 0
-            latencies = []
-            while time.perf_counter() < start_time + self.duration:
-                s = time.perf_counter()
-                try:
-                    self.db.search_embedding(
-                        test_data[idx],
-                        self.k,
-                        self.filters,
-                    )
-                except Exception as e:
-                    log.warning(f"VectorDB search_embedding error: {e}")
-                    traceback.print_exc(chain=True)
-                    raise e from None
-                
-                latencies.append(time.perf_counter() - s)
-                count += 1
-                # loop through the test data
-                idx = idx + 1 if idx < num - 1 else 0
+        start_time = time.perf_counter()
+        count = 0
+        latencies = []
+        while time.perf_counter() < start_time + self.duration:
+            s = time.perf_counter()
+            try:
+                self.db.search_embedding(
+                    test_data[idx],
+                    self.k,
+                    self.filters,
+                )
+            except Exception as e:
+                log.warning(f"VectorDB search_embedding error: {e}")
+                traceback.print_exc(chain=True)
+                raise e from None
 
-                if count % 500 == 0:
-                    log.debug(f"({mp.current_process().name:16}) search_count: {count}, latest_latency={time.perf_counter()-s}")
+            latencies.append(time.perf_counter() - s)
+            count += 1
+            # loop through the test data
+            idx = idx + 1 if idx < num - 1 else 0
+
+            if count % 500 == 0:
+                log.debug(f"({mp.current_process().name:16}) search_count: {count}, latest_latency={time.perf_counter()-s}")
 
         total_dur = round(time.perf_counter() - start_time, 4)
         log.info(
@@ -95,7 +96,7 @@ class MultiProcessingSearchRunner:
             for conc in self.concurrencies:
                 with mp.Manager() as m:
                     q, cond = m.Queue(), m.Condition()
-                    with concurrent.futures.ProcessPoolExecutor(mp_context=self.get_mp_context(), max_workers=conc) as executor:
+                    with concurrent.futures.ProcessPoolExecutor(mp_context=self.get_mp_context(), max_workers=conc, initializer=self.db.init) as executor:
                         log.info(f"Start search {self.duration}s in concurrency {conc}, filters: {self.filters}")
                         future_iter = [executor.submit(self.search, self.test_data, q, cond) for i in range(conc)]
                         # Sync all processes

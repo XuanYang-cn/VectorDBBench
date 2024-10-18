@@ -67,6 +67,8 @@ class Milvus(VectorDB):
                 index_name=self._index_name,
             )
             #  self._pre_load(coll)
+            if kwargs.get("pre_load") is True:
+                self._pre_load(col)
 
         connections.disconnect("default")
 

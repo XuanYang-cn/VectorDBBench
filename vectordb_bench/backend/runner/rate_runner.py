@@ -5,7 +5,7 @@ import multiprocessing as mp
 
 
 from vectordb_bench.backend.clients import api
-from vectordb_bench.backend.dataset import DatasetManager
+from vectordb_bench.backend.dataset import DataSetIterator
 from vectordb_bench.backend.utils import time_it
 
 from .util import get_data, is_futures_completed, get_future_exceptions
@@ -17,12 +17,12 @@ class RatedMultiThreadingInsertRunner:
         self,
         rate: int, # req per second
         db: api.VectorDB,
-        dataset: DatasetManager,
+        dataset_iter: DataSetIterator,
         normalize: bool = False,
         timeout: float | None = None,
     ):
         self.timeout = timeout if isinstance(timeout, (int, float)) else None
-        self.dataset = dataset
+        self.dataset = dataset_iter
         self.db = db
         self.normalize = normalize
         self.rate = rate
@@ -30,30 +30,30 @@ class RatedMultiThreadingInsertRunner:
     def send_insert_task(self, emb: list[list[float]], metadata: list[str]):
         self.db.insert_embeddings(emb, metadata)
 
-
     @time_it
-    def run_with_rate(self):
+    def run_with_rate(self, q: mp.Queue):
         with ThreadPoolExecutor(max_workers=mp.cpu_count(), initializer=self.db.init) as executor:
             executing_futures = []
-            dataset_iter = iter(self.dataset)
 
             def submit_by_rate() -> (float, bool):
                 start_time, rate = time.perf_counter(), self.rate
-                for data in dataset_iter:
+                for data in self.dataset:
                     emb, metadata = get_data(data, self.normalize)
                     executing_futures.append(executor.submit(self.send_insert_task, emb, metadata))
                     rate -= 1
 
                     if rate == 0:
-                        return time.perf_counter() - start_time, executing_futures, False
+                        return time.perf_counter() - start_time, False
                 return time.perf_counter() - start_time, rate == self.rate
 
             while True:
                 elapsed_time, finished = submit_by_rate()
                 if finished is True:
+                    q.put(None)
                     log.info(f"End of dataset, left unfinished={len(executing_futures)}")
                     return
 
+                q.put(True)
                 wait_interval = 1 - elapsed_time if elapsed_time < 1 else 0.001
 
                 e, completed = is_futures_completed(executing_futures, wait_interval)
@@ -61,6 +61,7 @@ class RatedMultiThreadingInsertRunner:
                     ex = get_future_exceptions(executing_futures)
                     if ex is not None:
                         log.warn(f"task error, terminating, err={ex}")
+                        q.put(None)
                         executor.shutdown(wait=True, cancel_futures=True)
                         raise ex
                     else:
