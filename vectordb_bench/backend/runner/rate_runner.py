@@ -39,7 +39,7 @@ class RatedMultiThreadingInsertRunner:
             executing_futures = []
 
             @time_it
-            def submit_by_rate() -> (float, bool):
+            def submit_by_rate() -> bool:
                 rate = self.batch_rate
                 for data in self.dataset:
                     emb, metadata = get_data(data, self.normalize)
@@ -52,7 +52,7 @@ class RatedMultiThreadingInsertRunner:
 
             while True:
                 start_time = time.perf_counter()
-                elapsed_time, finished = submit_by_rate()
+                finished, elapsed_time = submit_by_rate()
                 if finished is True:
                     q.put(None, block=True)
                     log.info(f"End of dataset, left unfinished={len(executing_futures)}")
