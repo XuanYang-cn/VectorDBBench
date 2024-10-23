@@ -16,7 +16,7 @@ class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunn
         self,
         db: api.VectorDB,
         dataset: DatasetManager,
-        insert_rate: int = 10,
+        insert_rate: int = 1000,
         normalize: bool = False,
         k: int = 100,
         filters: dict | None = None,
@@ -60,18 +60,18 @@ class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunn
 
 
     def run_search_by_sig(self, q):
-        # run search half way
-        insert_count = 0
+        total_batch = self.data_volume // self.insert_rate
+        search_rate = 0.1 * total_batch
+        batch = 0
         while q.get(block=True) is not None:
-            insert_count += config.NUM_PER_BATCH * self.insert_rate
-            if insert_count >= self.data_volume // 2:
-                log.info("Insert halfway done, run concurrent search")
-                self.run()
-                break
+            perc = batch * 100 / total_batch
+            if perc % 10 == 0:
+                log.info(f"Insert {perc}% done, total batch={total_batch}")
+                if perc / 10 >= 5:
+                    log.info(f"Insert {perc}% done, run concurrent search")
+                    self.run()
 
-        while q.get(block=True) is not None:
-            pass
+            search_rate = search_rate - 1 if search_rate > 0  else 0.1 * total_batch
+            batch += 1
 
-        log.info("Insert done, run the second concurrent search")
-        # run search when insertion done.
-        self.run()
+        log.info("Insert done")

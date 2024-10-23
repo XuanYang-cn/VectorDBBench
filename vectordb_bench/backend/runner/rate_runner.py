@@ -26,7 +26,7 @@ class RatedMultiThreadingInsertRunner:
         self.dataset = dataset_iter
         self.db = db
         self.normalize = normalize
-        self.rate = rate
+        self.insert_rate = rate
         self.batch_rate = rate // config.NUM_PER_BATCH
 
     def send_insert_task(self, db, emb: list[list[float]], metadata: list[str]):
@@ -47,7 +47,7 @@ class RatedMultiThreadingInsertRunner:
 
                     if rate == 0:
                         return time.perf_counter() - start_time, False
-                return time.perf_counter() - start_time, rate == self.rate
+                return time.perf_counter() - start_time, rate == self.batch_rate
 
             while True:
                 elapsed_time, finished = submit_by_rate()
@@ -68,7 +68,7 @@ class RatedMultiThreadingInsertRunner:
                         executor.shutdown(wait=True, cancel_futures=True)
                         raise ex
                     else:
-                        log.info(f"Finished {len(executing_futures)} insert-{config.NUM_PER_BATCH} task in 1s, wait_interval={wait_interval:.2f}")
+                        log.debug(f"Finished {len(executing_futures)} insert-{config.NUM_PER_BATCH} task in 1s, wait_interval={wait_interval:.2f}")
                     executing_futures = []
                 else:
                     log.warning(f"Failed to finish tasks in 1s, {e}, waited={wait_interval:.2f}, try to check the next round")
