@@ -7,6 +7,7 @@ import multiprocessing as mp
 from vectordb_bench.backend.clients import api
 from vectordb_bench.backend.dataset import DataSetIterator
 from vectordb_bench.backend.utils import time_it
+from vectordb_bench import config
 
 from .util import get_data, is_futures_completed, get_future_exceptions
 log = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ log = logging.getLogger(__name__)
 class RatedMultiThreadingInsertRunner:
     def __init__(
         self,
-        rate: int, # req per second
+        rate: int, # numRows per second
         db: api.VectorDB,
         dataset_iter: DataSetIterator,
         normalize: bool = False,
@@ -26,6 +27,7 @@ class RatedMultiThreadingInsertRunner:
         self.db = db
         self.normalize = normalize
         self.rate = rate
+        self.batch_rate = rate // config.NUM_PER_BATCH
 
     def send_insert_task(self, db, emb: list[list[float]], metadata: list[str]):
         db.insert_embeddings(emb, metadata)
@@ -37,7 +39,7 @@ class RatedMultiThreadingInsertRunner:
             executing_futures = []
 
             def submit_by_rate() -> (float, bool):
-                start_time, rate = time.perf_counter(), self.rate
+                start_time, rate = time.perf_counter(), self.batch_rate
                 for data in self.dataset:
                     emb, metadata = get_data(data, self.normalize)
                     executing_futures.append(executor.submit(self.send_insert_task, self.db, emb, metadata))
@@ -50,11 +52,11 @@ class RatedMultiThreadingInsertRunner:
             while True:
                 elapsed_time, finished = submit_by_rate()
                 if finished is True:
-                    q.put(None)
+                    q.put(None, block=True)
                     log.info(f"End of dataset, left unfinished={len(executing_futures)}")
                     return
 
-                q.put(True)
+                q.put(True, block=False)
                 wait_interval = 1 - elapsed_time if elapsed_time < 1 else 0.001
 
                 e, completed = is_futures_completed(executing_futures, wait_interval)
@@ -66,7 +68,7 @@ class RatedMultiThreadingInsertRunner:
                         executor.shutdown(wait=True, cancel_futures=True)
                         raise ex
                     else:
-                        log.info(f"Finished {len(executing_futures)} task in 1s, wait_interval={wait_interval:.2f}")
+                        log.info(f"Finished {len(executing_futures)} insert-{config.NUM_PER_BATCH} task in 1s, wait_interval={wait_interval:.2f}")
                     executing_futures = []
                 else:
                     log.warning(f"Failed to finish tasks in 1s, {e}, waited={wait_interval:.2f}, try to check the next round")

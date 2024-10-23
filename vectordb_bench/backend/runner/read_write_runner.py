@@ -48,7 +48,7 @@ class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunn
         import concurrent
         futures = []
         with mp.Manager() as m:
-            q = m.Queue(maxsize=100)
+            q = m.Queue()
             with concurrent.futures.ProcessPoolExecutor(mp_context=mp.get_context("spawn"), max_workers=2) as executor:
                 futures.append(executor.submit(self.run_with_rate, q))
                 futures.append(executor.submit(self.run_search_by_sig, q))
