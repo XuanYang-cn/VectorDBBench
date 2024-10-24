@@ -75,5 +75,5 @@ class RatedMultiThreadingInsertRunner:
                 else:
                     log.warning(f"Failed to finish tasks in 1s, {e}, waited={wait_interval:.2f}, try to check the next round")
                 dur = time.perf_counter() - start_time
-                if dur > 0:
+                if dur < 1:
                     time.sleep(1 - dur)
