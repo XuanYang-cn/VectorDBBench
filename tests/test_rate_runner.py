@@ -29,8 +29,8 @@ def test_rate_runner(db, insert_rate):
     _, t = runner.run_with_rate()
     log.info(f"insert run done, time={t}")
 
-def test_read_write_runner(db, insert_rate, local: bool=False):
-    cohere = Dataset.COHERE.manager(1_000_000)
+def test_read_write_runner(db, insert_rate, conc: list, local: bool=False):
+    cohere = Dataset.COHERE.manager(10_000_000)
     if local is True:
         source = DatasetSource.AliyunOSS
     else:
@@ -39,7 +39,10 @@ def test_read_write_runner(db, insert_rate, local: bool=False):
     assert prepared
 
     rw_runner = ReadWriteRunner(
-        db, cohere, insert_rate
+        db=db,
+        dataset=cohere,
+        insert_rate=insert_rate,
+        concurrencies=conc
     )
     rw_runner.run_read_write()
 
@@ -49,24 +52,25 @@ def get_db(db: str, config: dict) -> VectorDB:
         return DB.Milvus.init_cls(dim=768, db_config=config, db_case_config=FLATConfig(metric_type="COSINE"), drop_old=True, pre_load=True)
     elif db == DB.ZillizCloud.name:
         return DB.ZillizCloud.init_cls(dim=768, db_config=config, db_case_config=AutoIndexConfig(metric_type="COSINE"), drop_old=True, pre_load=True)
+    else:
+        raise ValueError(f"unknown db: {db}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--uri", type=str, default="http://127.0.0.1:19530", help="uri to connect")
     parser.add_argument("-r", "--insert_rate", type=int, default="1000", help="insert entity row count per seconds, cps")
-    parser.add_argument("-u", "--user", type=str, help="user name")
-    parser.add_argument("-p", "--password", type=str, help="password")
     parser.add_argument("-d", "--db", type=str, default=DB.Milvus.name, help="db name")
-    parser.add_argument("--s3", action='store_true', help="whether to use S3 dataset")
+    parser.add_argument("-c", "--conc", type=list, default=(1, 15, 50), help="search conc")
+    parser.add_argument("--use_s3", action='store_true', help="whether to use S3 dataset")
 
     flags = parser.parse_args()
 
-    config = {"uri": flags.uri}
-    if flags.user:
-        config["user"] = flags.user
-    if flags.password:
-        config["password"] = flags.password
+    # TODO read uri, user, password from .env
+    config = {
+            "uri": "http://localhost:19530",
+        "user": "", 
+        "password": "",
+    }
 
     db = get_db(flags.db, config)
-    test_read_write_runner(db, flags.insert_rate, flags.s3)
+    test_read_write_runner(db, flags.insert_rate, flags.conc, flags.use_s3)

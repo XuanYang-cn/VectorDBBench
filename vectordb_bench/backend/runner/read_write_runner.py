@@ -1,10 +1,11 @@
 import logging
 from typing import Iterable
 import multiprocessing as mp
+import concurrent
+import numpy as np
 
 from .mp_runner import MultiProcessingSearchRunner
 from .rate_runner import RatedMultiThreadingInsertRunner
-from vectordb_bench import config
 from vectordb_bench.backend.clients import api
 from vectordb_bench.backend.dataset import DatasetManager
 
@@ -20,14 +21,13 @@ class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunn
         normalize: bool = False,
         k: int = 100,
         filters: dict | None = None,
-        concurrencies: Iterable[int] = (1, 15),
-        duration: int = 30,
+        concurrencies: Iterable[int] = (1, 15, 50),
+        duration: int = 120, # TODO, choose duration based on dur of insert 10% data
         timeout: float | None = None,
     ):
         self.insert_rate = insert_rate
         self.data_volume = dataset.data.size
 
-        import numpy as np
         test_emb = np.stack(dataset.test_data["emb"])
         if normalize:
             test_emb = test_emb / np.linalg.norm(test_emb, axis=1)[:, np.newaxis]
@@ -45,7 +45,6 @@ class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunn
         )
 
     def run_read_write(self):
-        import concurrent
         futures = []
         with mp.Manager() as m:
             q = m.Queue()
@@ -54,24 +53,24 @@ class ReadWriteRunner(MultiProcessingSearchRunner, RatedMultiThreadingInsertRunn
                 futures.append(executor.submit(self.run_search_by_sig, q))
 
                 for future in concurrent.futures.as_completed(futures):
-                    future.result()
+                    res = future.result()
+                    log.Info(f"Result = {res}")
 
         log.info("Concurrent read write all done")
 
 
     def run_search_by_sig(self, q):
+        res = []
         total_batch = self.data_volume // self.insert_rate
-        search_rate = 0.1 * total_batch
-        batch = 0
+        batch = 1
         while q.get(block=True) is not None:
             perc = batch * 100 / total_batch
             if perc % 10 == 0:
                 log.info(f"Insert {perc}% done, total batch={total_batch}")
                 if perc / 10 >= 5:
                     log.info(f"Insert {perc}% done, run concurrent search")
-                    self.run()
+                    max_qps, _, _, _ = self.run()
+                    res.append((perc, max_qps))
 
-            search_rate = search_rate - 1 if search_rate > 0  else 0.1 * total_batch
             batch += 1
-
-        log.info("Insert done")
+        return res
