@@ -1,7 +1,10 @@
 import logging
 from dataclasses import dataclass, field
 
+import ir_measures
 import numpy as np
+from ir_measures import RR, Qrel, Recall, ScoredDoc, nDCG
+from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +51,77 @@ class Metric:
     st_conc_latency_p99_list_list: list[list[float]] = field(default_factory=list)
     st_conc_latency_p95_list_list: list[list[float]] = field(default_factory=list)
     st_conc_latency_avg_list_list: list[list[float]] = field(default_factory=list)
+
+
+class IRMetrics(BaseModel):
+    """FTS metrics calculated using ir_measures library.
+
+    Evaluates full-text search quality against human relevance judgments (qrels).
+    MSMARCO qrels are sparse (~1 relevant doc per query).
+
+    Current implementation uses a single K value. Fields are designed to support
+    future multi-K evaluation (e.g., @10, @50, @100) by extending to dict[int, float].
+    """
+
+    k: int = Field(default=100, description="Cutoff value used for @K metrics evaluation.")
+
+    recall: float = Field(
+        default=0.0,
+        description="Recall@K - Fraction of relevant documents (from human qrels) "
+        "retrieved in top-K results. Measures coverage of relevant documents.",
+    )
+
+    ndcg: float = Field(
+        default=0.0,
+        description="nDCG@K - Normalized Discounted Cumulative Gain. "
+        "Measures ranking quality with position-based discount. "
+        "Higher positions contribute more to the score.",
+    )
+
+    mrr: float = Field(
+        default=0.0,
+        description="MRR@K - Mean Reciprocal Rank. "
+        "Average of 1/rank for the first relevant document. "
+        "Measures how quickly the first relevant result appears.",
+    )
+
+
+def calc_fts_metrics_ir(
+    k: int,
+    qrels: dict[int, list[int]],
+    results: dict[int, list[int]],
+) -> IRMetrics:
+    """Calculate FTS metrics using ir_measures library.
+
+    Evaluates against human relevance judgments (qrels).
+    MSMARCO qrels are sparse (~1 relevant doc per query).
+
+    Args:
+        k: Cutoff for evaluation (e.g., 10, 50, 100)
+        qrels: Human relevance judgments {query_id: [relevant_doc_ids]}
+        results: System results to evaluate {query_id: [doc_ids in rank order]}
+
+    Returns:
+        IRMetrics containing k, recall, ndcg, mrr
+    """
+    # Convert system results to ScoredDoc format
+    # Score = reverse rank (higher score = better rank)
+    run = [
+        ScoredDoc(str(qid), str(did), float(len(dids) - i))
+        for qid, dids in results.items()
+        for i, did in enumerate(dids)
+    ]
+
+    # Metrics from human qrels (MRR, Recall, nDCG)
+    qrels_ir = [Qrel(str(qid), str(did), 1) for qid, dids in qrels.items() for did in dids]
+    qrels_metrics = ir_measures.calc_aggregate([RR @ k, Recall @ k, nDCG @ k], qrels_ir, run)
+
+    return IRMetrics(
+        k=k,
+        recall=qrels_metrics[Recall @ k],
+        ndcg=qrels_metrics[nDCG @ k],
+        mrr=qrels_metrics[RR @ k],
+    )
 
 
 QURIES_PER_DOLLAR_METRIC = "QP$ (Quries per Dollar)"

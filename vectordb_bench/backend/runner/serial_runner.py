@@ -8,11 +8,17 @@ import traceback
 import numpy as np
 import psutil
 
-from vectordb_bench.backend.dataset import DatasetManager, FtsDatasetManager
+from vectordb_bench.backend.dataset import DatasetManager, FtsDatasetManager, FtsGroundTruthData
 from vectordb_bench.backend.filter import Filter, FilterOp, non_filter
 
 from ... import config
-from ...metric import calc_mrr, calc_ndcg, calc_ndcg_fts, calc_recall, calc_recall_fts, get_ideal_dcg
+from ...metric import (
+    calc_fts_metrics_ir,
+    calc_mrr,
+    calc_ndcg,
+    calc_recall,
+    get_ideal_dcg,
+)
 from ...models import LoadTimeoutError, PerformanceTimeoutError
 from .. import utils
 from ..clients import api
@@ -317,6 +323,7 @@ class SerialSearchRunner:
         k: int = 100,
         filters: Filter = non_filter,
         search_fulltext: bool | None = None,
+        fts_ground_truth: FtsGroundTruthData | None = None,
     ):
         self.db = db
         self.k = k
@@ -340,6 +347,7 @@ class SerialSearchRunner:
         else:
             self.test_data = test_data
         self.ground_truth = ground_truth
+        self._fts_ground_truth = fts_ground_truth
 
     def _get_db_search_res(self, emb: list[float] | str, retry_idx: int = 0) -> list[int]:
         try:
@@ -359,7 +367,37 @@ class SerialSearchRunner:
         with self.db.init():
             self.db.prepare_filter(self.filters)
             test_data, ground_truth = args
-            ideal_dcg = None if self._use_fts_metrics else get_ideal_dcg(self.k)
+
+            # FTS ir_measures path: batch metrics calculation
+            if self._use_fts_metrics and self._fts_ground_truth is not None:
+                # test_data is list[FtsQuery] with query_id and text
+                results_dict: dict[int, list[int]] = {}
+                latencies: list[float] = []
+
+                for idx, query in enumerate(test_data):  # FtsQuery objects
+                    s = time.perf_counter()
+                    results = self._get_db_search_res(query.text)
+                    latencies.append(time.perf_counter() - s)
+                    results_dict[query.query_id] = results
+
+                # Calculate metrics using ir_measures
+                ir_metrics = calc_fts_metrics_ir(
+                    k=self.k,
+                    qrels=self._fts_ground_truth.qrels,
+                    results=results_dict,
+                )
+
+                p99 = round(np.percentile(latencies, 99), 4)
+                p95 = round(np.percentile(latencies, 95), 4)
+                log.info(
+                    f"{mp.current_process().name:14} FTS search complete: "
+                    f"recall={ir_metrics.recall:.4f}, ndcg={ir_metrics.ndcg:.4f}, "
+                    f"mrr={ir_metrics.mrr:.4f}, p99={p99}, p95={p95}"
+                )
+                return (ir_metrics.recall, ir_metrics.ndcg, ir_metrics.mrr, p99, p95)
+
+            #  ideal_dcg = None if self._use_fts_metrics else get_ideal_dcg(self.k)
+            ideal_dcg = get_ideal_dcg(self.k)
 
             log.debug(f"test dataset size: {len(test_data)}")
             log.debug(f"ground truth size: {len(ground_truth)}")
@@ -377,14 +415,14 @@ class SerialSearchRunner:
 
                 if ground_truth is not None:
                     gt = ground_truth[idx]
-                    if self._use_fts_metrics:
-                        recalls.append(calc_recall_fts(self.k, gt, results))
-                        ndcgs.append(calc_ndcg_fts(self.k, gt, results))
-                        mrrs.append(calc_mrr(gt, results))
-                    else:
-                        recalls.append(calc_recall(self.k, gt[: self.k], results))
-                        ndcgs.append(calc_ndcg(gt[: self.k], results, ideal_dcg))
-                        mrrs.append(calc_mrr(gt[: self.k], results))
+                    #  if self._use_fts_metrics:
+                    #      recalls.append(calc_recall_fts(self.k, gt, results))
+                    #      ndcgs.append(calc_ndcg_fts(self.k, gt, results))
+                    #      mrrs.append(calc_mrr(gt, results))
+                    #  else:
+                    recalls.append(calc_recall(self.k, gt[: self.k], results))
+                    ndcgs.append(calc_ndcg(gt[: self.k], results, ideal_dcg))
+                    mrrs.append(calc_mrr(gt[: self.k], results))
                 else:
                     recalls.append(0)
                     ndcgs.append(0)

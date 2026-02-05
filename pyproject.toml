@@ -43,6 +43,7 @@ dependencies = [
     "ujson",
     "hdrhistogram>=0.10.1",
     "ir_datasets",
+    "ir_measures",
 ]
 dynamic = ["version"]
 

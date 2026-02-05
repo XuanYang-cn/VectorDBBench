@@ -9,6 +9,7 @@ import pathlib
 import types
 import typing
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum
@@ -529,21 +530,25 @@ DatasetWithSizeMap = {
 # FTS Dataset Translator Pattern
 @dataclass
 class FtsQuery:
-    """Internal representation of an FTS query."""
-
     query_id: int
     text: str
 
 
 @dataclass
 class FtsDocument:
-    """Internal representation of an FTS document."""
-
     doc_id: int
     text: str
 
 
-FtsGroundTruth = dict[int, list[int]]  # query_id -> relevant doc_ids
+@dataclass
+class FtsGroundTruthData:
+    """Ground truth data for FTS evaluation.
+
+    Contains human relevance judgments (qrels) for MRR, Recall, nDCG metrics.
+    MSMARCO qrels are sparse (~1 relevant doc per query).
+    """
+
+    qrels: dict[int, list[int]]  # Human judgments -> MRR, Recall, nDCG
 
 
 class FtsDatasetTranslator(ABC):
@@ -568,14 +573,6 @@ class FtsDatasetTranslator(ABC):
     @abstractmethod
     def translate_document(self, ir_doc: typing.Any) -> FtsDocument:
         """Convert ir_datasets document to internal FtsDocument format."""
-
-    @abstractmethod
-    def load_ground_truth(self, dataset: typing.Any) -> FtsGroundTruth:
-        """Load ground truth data from ir_datasets.
-
-        Returns:
-            dict mapping query_id to list of relevant doc_ids
-        """
 
     def load(self) -> typing.Any:
         """Load ir_datasets dataset."""
@@ -609,16 +606,34 @@ class MSMarcoTranslator(FtsDatasetTranslator):
         clean_text = ir_doc.text.replace("\t", " ").replace("\n", " ")
         return FtsDocument(doc_id=int(ir_doc.doc_id), text=clean_text)
 
-    def load_ground_truth(self, dataset: typing.Any) -> FtsGroundTruth:
-        """Load ground truth from MS MARCO scoreddocs."""
-        gt: FtsGroundTruth = {}
-        for scoreddoc in dataset.scoreddocs_iter():
-            query_id = int(scoreddoc.query_id)
-            doc_id = int(scoreddoc.doc_id)
-            if query_id not in gt:
-                gt[query_id] = []
-            gt[query_id].append(doc_id)
-        return gt
+    def load_test_data(self, dataset: typing.Any) -> tuple[list[FtsQuery], FtsGroundTruthData]:
+        """Load queries and ground truth together, returning only evaluable queries.
+
+        The translator handles all filtering internally to avoid loading large datasets
+        into memory. Only queries that have qrels (can be evaluated) are returned.
+
+        Returns:
+            tuple of:
+            - list[FtsQuery]: Queries that have ground truth (can be evaluated)
+            - FtsGroundTruthData: Ground truth for those queries only
+        """
+        # Step 1: Build qrels to know which queries are evaluable
+        qrels: dict[int, list[int]] = defaultdict(list)
+        for qrel in dataset.qrels_iter():
+            if qrel.relevance > 0:
+                qrels[int(qrel.query_id)].append(int(qrel.doc_id))
+        qrels = dict(qrels)  # Convert back for consistent type
+        log.info(f"Found {len(qrels)} queries with qrels")
+
+        # Step 2: Load query texts (only for queries with qrels)
+        queries = [
+            FtsQuery(query_id=int(q.query_id), text=q.text.replace("\t", " ").replace("\n", " "))
+            for q in dataset.queries_iter()
+            if int(q.query_id) in qrels
+        ]
+        log.info(f"Loaded {len(queries)} evaluable queries")
+
+        return queries, FtsGroundTruthData(qrels=qrels)
 
 
 class FtsBaseDataset(BaseModel):
@@ -693,7 +708,7 @@ class FtsDatasetManager(BaseModel):
     _translator: typing.Any = PrivateAttr()
 
     queries_data: list[FtsQuery] | None = None
-    qrels_data: FtsGroundTruth | None = None
+    gt_data: FtsGroundTruthData | None = None
     _ir_dataset: typing.Any = PrivateAttr(default=None)
 
     def __init__(self, **data):
@@ -758,13 +773,9 @@ class FtsDatasetManager(BaseModel):
 
             # Load queries and qrels using translator
             if self.data.with_gt:
-                # Load queries using translator
-                self.queries_data = list(self._translator.iter_queries(self._ir_dataset))
-                log.info(f"Loaded {len(self.queries_data)} queries into memory")
-
-                # Load ground truth using translator
-                self.qrels_data = self._translator.load_ground_truth(self._ir_dataset)
-                log.info(f"Loaded ground truth for {len(self.qrels_data)} queries into memory")
+                # Translator returns only evaluable queries + their ground truth
+                self.queries_data, self.gt_data = self._translator.load_test_data(self._ir_dataset)
+                log.info(f"Loaded {len(self.queries_data)} evaluable queries with ground truth")
 
         except Exception:
             log.exception("Failed to prepare FTS dataset")

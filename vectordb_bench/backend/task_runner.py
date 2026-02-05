@@ -424,30 +424,22 @@ class CaseRunner(BaseModel):
     def _init_fts_search_runner(self):
         fts_dataset = self.ca.dataset
 
-        test_texts: list[str] = []
-        ground_truth: list[list[int]] = []
-
-        # Use all queries from the dataset
-        for q in fts_dataset.queries_data:
-            qid = q.query_id  # FtsQuery object, not dict
-            if qid not in fts_dataset.qrels_data:
-                continue
-            test_texts.append(q.text)  # FtsQuery object, not dict
-            ground_truth.append(fts_dataset.qrels_data[qid])
-
-        log.info(f"FTS test will use {len(test_texts)} queries for testing")
-        self.test_texts = test_texts
+        # queries_data already contains only evaluable queries (filtered by translator)
+        log.info(f"FTS test will use {len(fts_dataset.queries_data)} queries for testing")
 
         if TaskStage.SEARCH_SERIAL in self.config.stages:
             self.serial_search_runner = SerialSearchRunner(
                 db=self.db,
-                test_data=test_texts,
-                ground_truth=ground_truth,
+                test_data=fts_dataset.queries_data,  # list[FtsQuery] - already filtered
+                ground_truth=None,  # Not used for FTS with ir_measures
                 filters=self.ca.filters,
                 k=self.config.case_config.k,
                 search_fulltext=True,
+                fts_ground_truth=fts_dataset.gt_data,  # FtsGroundTruthData
             )
         if TaskStage.SEARCH_CONCURRENT in self.config.stages:
+            # For concurrent search, extract text strings from FtsQuery objects
+            test_texts = [q.text for q in fts_dataset.queries_data]
             self.search_runner = MultiProcessingSearchRunner(
                 db=self.db,
                 test_data=test_texts,
