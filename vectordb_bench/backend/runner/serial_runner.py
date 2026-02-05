@@ -231,7 +231,7 @@ class SerialFtsInsertRunner:
         self.dataset = dataset
         self.db = db
 
-    def retry_insert(self, db: api.VectorDB, texts: list[str], doc_ids: list[int], retry_idx: int = 0):
+    def retry_insert(self, db: api.VectorDB, texts: list[str], doc_ids: list[str], retry_idx: int = 0):
         """Retry FTS insert with exponential backoff."""
         _, error = db.insert_documents(texts=texts, doc_ids=doc_ids)
         if error is not None:
@@ -252,7 +252,7 @@ class SerialFtsInsertRunner:
         """
         count = 0
         buffer_size = config.NUM_PER_BATCH  # Use same batch size as dataset iterator
-        insert_buffer: list[tuple[int, str]] = []  # List of (doc_id, text) tuples
+        insert_buffer: list[tuple[str, str]] = []  # List of (doc_id, text) tuples
 
         def flush_buffer() -> int:
             """Insert all documents in buffer and return count."""
@@ -279,7 +279,7 @@ class SerialFtsInsertRunner:
             for batch in self.dataset:
                 for doc in batch:
                     # Extract doc_id and text from FtsDocument object
-                    doc_id = doc.doc_id if hasattr(doc, "doc_id") else int(doc["doc_id"])
+                    doc_id = doc.doc_id if hasattr(doc, "doc_id") else str(doc["doc_id"])
                     text = doc.text if hasattr(doc, "text") else doc["text"]
 
                     # Add to buffer
@@ -371,7 +371,7 @@ class SerialSearchRunner:
             # FTS ir_measures path: batch metrics calculation
             if self._use_fts_metrics and self._fts_ground_truth is not None:
                 # test_data is list[FtsQuery] with query_id and text
-                results_dict: dict[int, list[int]] = {}
+                results_dict: dict[str, list[str]] = {}
                 latencies: list[float] = []
 
                 for idx, query in enumerate(test_data):  # FtsQuery objects

@@ -88,8 +88,8 @@ class IRMetrics(BaseModel):
 
 def calc_fts_metrics_ir(
     k: int,
-    qrels: dict[int, list[int]],
-    results: dict[int, list[int]],
+    qrels: dict[str, list[str]],
+    results: dict[str, list[str]],
 ) -> IRMetrics:
     """Calculate FTS metrics using ir_measures library.
 

@@ -85,7 +85,7 @@ class Milvus(VectorDB):
         if not utility.has_collection(self.collection_name):
             if self._is_fts:
                 fields = [
-                    FieldSchema(name=self._primary_field, dtype=DataType.INT64, is_primary=True),
+                    FieldSchema(name=self._primary_field, dtype=DataType.VARCHAR, max_length=64, is_primary=True),
                     FieldSchema(
                         name=self._text_field,
                         dtype=DataType.VARCHAR,
@@ -303,7 +303,7 @@ class Milvus(VectorDB):
     def insert_documents(
         self,
         texts: Iterable[str],
-        doc_ids: list[int],
+        doc_ids: list[str],
         **kwargs,
     ) -> tuple[int, Exception | None]:
         """Insert documents into Milvus FTS collection using row-based format.
@@ -408,7 +408,7 @@ class Milvus(VectorDB):
         query: str,
         k: int = 100,
         timeout: int | None = None,
-    ) -> list[int]:
+    ) -> list[str]:
         """Search documents and return results."""
         if not self._is_fts:
             msg = "search_documents only valid in FTS mode"

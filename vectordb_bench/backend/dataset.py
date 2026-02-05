@@ -530,13 +530,13 @@ DatasetWithSizeMap = {
 # FTS Dataset Translator Pattern
 @dataclass
 class FtsQuery:
-    query_id: int
+    query_id: str
     text: str
 
 
 @dataclass
 class FtsDocument:
-    doc_id: int
+    doc_id: str
     text: str
 
 
@@ -548,7 +548,7 @@ class FtsGroundTruthData:
     MSMARCO qrels are sparse (~1 relevant doc per query).
     """
 
-    qrels: dict[int, list[int]]  # Human judgments -> MRR, Recall, nDCG
+    qrels: dict[str, list[str]]  # Human judgments -> MRR, Recall, nDCG
 
 
 class FtsDatasetTranslator(ABC):
@@ -598,13 +598,11 @@ class MSMarcoTranslator(FtsDatasetTranslator):
 
     def translate_query(self, ir_query: typing.Any) -> FtsQuery:
         """Convert MS MARCO query to internal format."""
-        return FtsQuery(query_id=int(ir_query.query_id), text=ir_query.text)
+        return FtsQuery(query_id=ir_query.query_id, text=ir_query.text)
 
     def translate_document(self, ir_doc: typing.Any) -> FtsDocument:
         """Convert MS MARCO document to internal format."""
-        # Clean text: replace tabs and newlines with spaces
-        clean_text = ir_doc.text.replace("\t", " ").replace("\n", " ")
-        return FtsDocument(doc_id=int(ir_doc.doc_id), text=clean_text)
+        return FtsDocument(doc_id=ir_doc.doc_id, text=ir_doc.text)
 
     def load_test_data(self, dataset: typing.Any) -> tuple[list[FtsQuery], FtsGroundTruthData]:
         """Load queries and ground truth together, returning only evaluable queries.
@@ -618,18 +616,18 @@ class MSMarcoTranslator(FtsDatasetTranslator):
             - FtsGroundTruthData: Ground truth for those queries only
         """
         # Step 1: Build qrels to know which queries are evaluable
-        qrels: dict[int, list[int]] = defaultdict(list)
+        qrels: dict[str, list[str]] = defaultdict(list)
         for qrel in dataset.qrels_iter():
             if qrel.relevance > 0:
-                qrels[int(qrel.query_id)].append(int(qrel.doc_id))
+                qrels[qrel.query_id].append(qrel.doc_id)
         qrels = dict(qrels)  # Convert back for consistent type
         log.info(f"Found {len(qrels)} queries with qrels")
 
         # Step 2: Load query texts (only for queries with qrels)
         queries = [
-            FtsQuery(query_id=int(q.query_id), text=q.text.replace("\t", " ").replace("\n", " "))
+            FtsQuery(query_id=q.query_id, text=q.text)
             for q in dataset.queries_iter()
-            if int(q.query_id) in qrels
+            if q.query_id in qrels
         ]
         log.info(f"Loaded {len(queries)} evaluable queries")
 
